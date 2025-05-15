@@ -1,0 +1,44 @@
+db.products.aggregate([
+  {
+    $match: {
+      status: { $in: ['active', 'approved', 'rejected'] },
+      productType: "your_product_type" // Replace with actual product type or parameter
+    }
+  },
+  {
+    $addFields: {
+      filterDate: {
+        $switch: {
+          branches: [
+            {
+              case: { $eq: ["$status", "active"] },
+              then: "$creationDate"
+            },
+            {
+              case: { $eq: ["$status", "approved"] },
+              then: "$approvalDate"
+            },
+            {
+              case: { $eq: ["$status", "rejected"] },
+              then: "$rejectedDate"
+            }
+          ],
+          default: null
+        }
+      }
+    }
+  },
+  {
+    $match: {
+      filterDate: {
+        $gte: ISODate("2024-01-01T00:00:00Z"), // Replace with your start date
+        $lte: ISODate("2024-12-31T23:59:59Z")  // Replace with your end date
+      }
+    }
+  },
+  {
+    $project: {
+      filterDate: 0 // optional: remove temporary field from final result
+    }
+  }
+])
