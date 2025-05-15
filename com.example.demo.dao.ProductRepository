@@ -1,44 +1,48 @@
-db.products.aggregate([
-  {
-    $match: {
-      status: { $in: ['active', 'approved', 'rejected'] },
-      productType: "your_product_type" // Replace with actual product type or parameter
+@Repository
+public class ProductRepository {
+
+    @Autowired
+    private MongoTemplate mongoTemplate;
+
+    public List<Product> findProductsByStatusAndDateRange(String status, String productType, Date startDate, Date endDate) {
+
+        // Stage 1: Match status and product type
+        MatchOperation matchStatusAndType = Aggregation.match(
+                Criteria.where("status").in("active", "approved", "rejected")
+                        .and("productType").is(productType)
+        );
+
+        // Stage 2: Add computed field `filterDate` based on status
+        AddFieldsOperation addFilterDate = context -> new Document("$addFields",
+                new Document("filterDate",
+                    new Document("$switch",
+                        new Document("branches", List.of(
+                            new Document("case", new Document("$eq", List.of("$status", "active")))
+                                .append("then", "$creationDate"),
+                            new Document("case", new Document("$eq", List.of("$status", "approved")))
+                                .append("then", "$approvalDate"),
+                            new Document("case", new Document("$eq", List.of("$status", "rejected")))
+                                .append("then", "$rejectedDate")
+                        )).append("default", null)
+                    )
+                )
+        );
+
+        // Stage 3: Match on filterDate
+        MatchOperation matchDateRange = Aggregation.match(
+                Criteria.where("filterDate").gte(startDate).lte(endDate)
+        );
+
+        // Stage 4: Optional - Remove filterDate from final result
+        ProjectionOperation projectFinal = Aggregation.project().andExclude("filterDate");
+
+        Aggregation aggregation = Aggregation.newAggregation(
+                matchStatusAndType,
+                addFilterDate,
+                matchDateRange,
+                projectFinal
+        );
+
+        return mongoTemplate.aggregate(aggregation, "products", Product.class).getMappedResults();
     }
-  },
-  {
-    $addFields: {
-      filterDate: {
-        $switch: {
-          branches: [
-            {
-              case: { $eq: ["$status", "active"] },
-              then: "$creationDate"
-            },
-            {
-              case: { $eq: ["$status", "approved"] },
-              then: "$approvalDate"
-            },
-            {
-              case: { $eq: ["$status", "rejected"] },
-              then: "$rejectedDate"
-            }
-          ],
-          default: null
-        }
-      }
-    }
-  },
-  {
-    $match: {
-      filterDate: {
-        $gte: ISODate("2024-01-01T00:00:00Z"), // Replace with your start date
-        $lte: ISODate("2024-12-31T23:59:59Z")  // Replace with your end date
-      }
-    }
-  },
-  {
-    $project: {
-      filterDate: 0 // optional: remove temporary field from final result
-    }
-  }
-])
+}
